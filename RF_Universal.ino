@@ -49,7 +49,7 @@ Adafruit_SSD1306 display(OLED_RESET);
 #define Bpin 6
 #define Cpin 5
 
-#define vers "2.4.1"
+#define vers "2.4.2"
 #define pname "RF Universal"
 
 #if (SSD1306_LCDHEIGHT != 32)
