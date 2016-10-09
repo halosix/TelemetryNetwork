@@ -3,7 +3,8 @@ Arduino powered telemetry network
 
 BME280_Tester.ino
 
-        a simple graphical tester for the BME280 sensor. Attach BME280 to i2c bus, OLED to hardware SPI. Tested with 32u4 Feather.
+        a simple graphical tester for the BME280 sensor. 
+	Attach BME280 to i2c bus, OLED to hardware SPI. Tested with 32u4 Feather.
         Displays temperature, pressure, pressure altitude, and humidity.
 	
 RF_Beacon.ino
