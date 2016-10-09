@@ -1,7 +1,11 @@
 /*
     RF Beacon
 
-    v 1.0       201610080405Z
+    v 1.1		201610090650Z
+	
+	cleaned up the code a bit
+	
+	v 1.0       201610080405Z
 
     initial commit of RFBeacon
     32u4 Feather LoRa with BME280
@@ -17,11 +21,10 @@
 #define RFM95_CS 8
 #define RFM95_RST 4
 #define RFM95_INT 7
-#define OLED_RESET 4
-
-#define pid "1B"
-#define vers "3.0_dev"
-#define pname "RF Universal"
+ 
+#define pid "9X"
+#define vers "1.1"
+#define pname "RF Beacon"
 
 #define RF95_FREQ 915.0  // RFM95 is the 900ISM version, so range is 902-928, 915 center.
 
@@ -32,6 +35,11 @@ Adafruit_BME280 bme; // I2C
 void setup()   {                
     Serial.begin(9600);
 
+	Serial.println(pname);
+	Serial.print("v ");
+	Serial.println(vers);
+	Serial.println("halosix technologies");
+	
     pinMode(RFM95_RST, OUTPUT);
     digitalWrite(RFM95_RST, HIGH);
   
