@@ -88,12 +88,16 @@ void oledinit()
     display.clearDisplay();
     display.setTextSize(1); display.setTextColor(WHITE); display.setCursor(0,0);
     display.println(pname); 
+	Serial.println(pname);
     display.print("v ");
+	Serial.print("v ");
     display.println(vers);
+	Serial.println(vers);
     display.setCursor(0,24);
     display.println("halosix technologies");
+	Serial.println("halosix technologies");
     display.display();
     delay(3000);
     display.clearDisplay();
-
+ 	
 }
