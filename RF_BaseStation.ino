@@ -1,5 +1,10 @@
 /*
-	RF Base Station
+	RF BaseStation
+	
+	v 2.0			201610151937Z
+	
+	init both displays, listen on RF95_FREQ, and display partially parsed output to lcd0
+	changed receive logic over to strtok, this allows us to parse the received string
 	
 	v 1.0			201610130715Z
 	
@@ -14,7 +19,7 @@
 		6.3v 220uF capacitor across power rails feeding RF
 		
 */
-	
+
 #include <SPI.h>
 #include <RH_RF95.h>
 #include <Wire.h>
@@ -34,6 +39,7 @@ RH_RF95 rf95(RFM95_CS, RFM95_INT);
 #define Cpin 5
 
 Adafruit_LiquidCrystal lcd(0);
+Adafruit_LiquidCrystal lcdb(1);
 
 int txflag = 0;
 int rxflag = 0;
@@ -47,6 +53,8 @@ void setup()
   
   lcd.setBacklight(HIGH);
   lcd.begin(16, 2);
+  lcdb.setBacklight(HIGH);
+  lcdb.begin(16, 2);
     
   pinMode(LED, OUTPUT);     
   pinMode(RFM95_RST, OUTPUT);
@@ -54,8 +62,6 @@ void setup()
 
   Serial.begin(9600);
   delay(100);
-
-  Serial.println("Arduino LoRa RX Test!");
   
   // manual reset
   digitalWrite(RFM95_RST, LOW);
@@ -81,6 +87,8 @@ void setup()
     lcd.clear();
     lcd.print("listening...");
 
+    lcdb.clear();
+    lcdb.print("waiting...");
 }
 
 int16_t packetnum = 0;  // packet counter, we increment transmission
@@ -109,28 +117,42 @@ void listen()
     if (rf95.recv(buf, &len))
     {
       digitalWrite(LED, HIGH);
-      RH_RF95::printBuffer("Received: ", buf, len);
-      Serial.print("Got: ");
-      Serial.println((char*)buf);
       
+      RH_RF95::printBuffer("Received: ", buf, len);
+
+      // lcd.print((char*)buf);  // dump raw packet
+
+      String SN = strtok((char*)buf, ".");  // start parsing the received string - here we stop at . and return data to the left of it as a String, passing the remainder to the next strtok()
+      int TP = atoi(strtok(NULL, ",")); // which is here! same as above, but we stop at , for temperature
+      int HD = atoi(strtok(NULL, ",")); // still , this is for humidity
+      int PR = atoi(strtok(NULL, ",")); // still , this one for pressure in millibars
+      int BT = atoi(strtok(NULL, ":")); // ending with : to return the remote battery voltage
+
+      float BTF = BT /= 1024;  // we sent the voltage as vbat*2*3.3 to avoid sending decimals, here we /=1024 to return actual voltage
+    
       lcd.clear();
       lcd.setCursor(0, 0);
-      lcd.print((char*)buf);
-      
-      Serial.print("RSSI: ");
-      Serial.println(rf95.lastRssi(), DEC);
-      
+      lcd.print(SN);
+      lcd.setCursor(6, 0);
+      lcd.print(TP);
+      lcd.setCursor(9, 0);
+      lcd.print(HD);
+      lcd.setCursor(12, 0);
+      lcd.print(PR);
       lcd.setCursor(0, 1);
+      lcd.print(BTF);
+      lcd.setCursor(4, 1);
+      lcd.print("v");
+      lcd.setCursor(7, 1);
+      lcd.print("RSSI");
+      lcd.setCursor(12, 1);
       lcd.print(rf95.lastRssi(), DEC);
       
       digitalWrite(LED, LOW);
 
     }
     
-    else
-    {
-      Serial.println("Receive failed");
-    }
+    else { Serial.println("Receive failed"); }
   }
   
     if (!digitalRead(Apin))
