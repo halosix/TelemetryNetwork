@@ -162,7 +162,7 @@ void loop()  // just transmit rpacket[] every $interval - no listening period (y
     display.display();
 
     rf95.sleep();
-    Watchdog.sleep(10000);
+    Watchdog.sleep(interval);
 }
 
 void oledinit()
