@@ -1,6 +1,14 @@
 /*
     RF Beacon
 
+    v 3.2           201610170626Z       27672/28672/1741
+
+    removed currentMillis / interval stuff, replaced with radio.sleep() and Watchdog.sleep(), added #include Adafruit_SleepyDog.h [for power reasons, we'll see if it matters]
+    
+    v 3.1           201610170528Z       27678/28672/1743
+
+    changed battery voltage reporting around
+    
     v 3.0           201610170322Z       28166/28672/1763
 
     nearing production-quality code
@@ -48,29 +56,30 @@ Global variables use 1,664 bytes of dynamic memory. WITH OLED */
 #include <Adafruit_BME280.h>
 #include <Adafruit_TCS34725.h>
 #include <Adafruit_FeatherOLED.h>
+#include <Adafruit_SleepyDog.h>
 
 Adafruit_FeatherOLED oled = Adafruit_FeatherOLED();
 
 #define OLED_RESET 4
 Adafruit_SSD1306 display(OLED_RESET);
-
 #define Apin 9
 #define Bpin 6
 #define Cpin 5
-
 #define RFM95_CS 8
 #define RFM95_RST 4
 #define RFM95_INT 7
- 
 #define pid "BY"
-#define vers "3.0_dev"
+#define vers "3.1"
 #define pname "RF Beacon"
-
 #define VBATPIN A9  // measure battery
 #define RF95_FREQ 915.0  // RFM95 is the 900ISM version, so range is 902-928, 915 center.
+#define LED 13
+
+int16_t packetnum = 0;  // packet counter, we increment transmission
+long previousMillis = 0;
+long interval = 10000;  // interval between transmissions. 1000 is 1 second.
 
 RH_RF95 rf95(RFM95_CS, RFM95_INT);  // Singleton instance of the radio driver
-
 Adafruit_BME280 bme; // use i2c, lets keep spi for rf
 
 #if (SSD1306_LCDHEIGHT != 32)
@@ -100,8 +109,6 @@ void setup()
     if (!rf95.setFrequency(RF95_FREQ)) {
         Serial.println("setFrequency failed");
         while (1); }
-  
-    rf95.setTxPower(23, false);
 
     if (!bme.begin()) {
         Serial.println("Could not find a valid BME280 sensor, check wiring!");
@@ -113,25 +120,14 @@ void setup()
         Serial.println("No TCS34725 found ... check your connections");
         while (1);
         }
+    rf95.setTxPower(23, false);
 }
-
-#define LED 13
-
-int16_t packetnum = 0;  // packet counter, we increment transmission
-long previousMillis = 0;
-long interval = 10000;  // interval between transmissions. 1000 is 1 second.
 
 void loop()  // just transmit rpacket[] every $interval - no listening period (yet)
 {
     unsigned long currentMillis = millis();
-//    display.clearDisplay();
     display.setTextSize(1); display.setTextColor(WHITE);
-    int countdown = (((interval-(currentMillis-previousMillis)))/1000); 
-    int progress = map(countdown, 0, 100, 16, 128);
-    if(countdown==0) { display.setCursor(0,24); display.print("TX"); digitalWrite(A0, HIGH); } else { display.setCursor(countdown*10,24); display.print("<"); }          // display.setCursor(progress,24); display.print(countdown); }
     
-    if(currentMillis - previousMillis > interval)
-    {
         digitalWrite(13, HIGH);   // LED on, so we can see its doing something
         previousMillis = currentMillis;  // reset the timer so we know when we last TX'd
         int tmp = ((bme.readTemperature()*1.8)+32);  // get sensor values
@@ -141,28 +137,32 @@ void loop()  // just transmit rpacket[] every $interval - no listening period (y
         tcs.getRawData(&r, &g, &b, &c);
         colorTemp = tcs.calculateColorTemperature(r, g, b);
         lux = tcs.calculateLux(r, g, b);
-  
-        int measuredvbat = analogRead(VBATPIN);
+        
+        float measuredvbat = analogRead(VBATPIN);
         measuredvbat *= 2;    // voltage divider was used, so double the measurement
         measuredvbat *= 3.3;  // multiply by aref (3.3) - send this so i dont have to worry about decimals. /= 1024 to get voltage on the rx end.
-        float cvbat = measuredvbat/=1024;
+        measuredvbat /= 1024;
+        measuredvbat *= 100;
+        int batlvl = map(measuredvbat, 320, 420, 5, 95);  // crude battery level here, vbat*=100 to get rid of the decimal [since map() uses integer math] then map it to 5-95
+        
         display.clearDisplay();
         display.setTextSize(1); display.setTextColor(WHITE); display.setCursor(0,0);
         display.print(tmp); display.print(" "); display.print(humi); display.print(" "); display.print(pres); display.print(" "); display.print(colorTemp); display.print(" "); display.println(lux); 
         display.println("T  H  Pr   cT    lx");
-        display.print(cvbat); display.print(" v | "); display.print("int "); display.print(interval); display.println(" ms");
-        
+        display.print(batlvl); display.print(" v | "); display.print("int "); display.print(interval/1000); display.println(" s");
         
         char rpacket[64];
-        sprintf(rpacket, "BY-WX.%d,%d,%d,%d,%d,%d:",tmp,humi,pres,colorTemp,lux,measuredvbat);  // use sprintf to build our packet! char to 64, then mask it out
+        sprintf(rpacket, "BY-WX:%d,%d,%d,%d,%d,%d:",tmp,humi,pres,colorTemp,lux,batlvl);  // use sprintf to build our packet! char to 64, then mask it out
         delay(50);  // wait a bit
         rf95.send((uint8_t *)rpacket, strlen(rpacket));  // send the packet we previously built
         rf95.waitPacketSent();  // wait for TX to complete
         digitalWrite(13, LOW);    // LED off, with the stuff and the delay(50) there should be plenty for a visible flicker
         digitalWrite(A0, LOW);
-    }
-
+        
     display.display();
+
+    rf95.sleep();
+    Watchdog.sleep(10000);
 }
 
 void oledinit()
