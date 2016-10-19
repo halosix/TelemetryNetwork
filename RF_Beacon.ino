@@ -1,44 +1,52 @@
 /*
     RF Beacon
 
+    HARDWARE
+        designed for and tested on 32u4 Feather with RFM95 LoRa, BME280, and TCS34725
+        pinout: payload board, 220uF cap across rails, BME280 and TCS34725 to 3v3 GND SDA SCL, red LED across rails, green LED to A0
+        this will probably work with any arduino-compatible board, note that A9 is connected to vBat on the Feather
+        
+
+    v 3.3           201610190221Z       27666/28672/1739
+
+    condensed the battery level math
+    added a sanity check to lux so cT doesnt overflow the display
+    added a sanity check to lux so lux doesnt overflow the display
+    rewrote the display for better consistency
+    NOTE: 3.2 code ran on two devices (BY and RV) for ~24 hours with no issues, battery capacity seems adequate
+    
+    
     v 3.2           201610170626Z       27672/28672/1741
 
     removed currentMillis / interval stuff, replaced with radio.sleep() and Watchdog.sleep(), added #include Adafruit_SleepyDog.h [for power reasons, we'll see if it matters]
+    
     
     v 3.1           201610170528Z       27678/28672/1743
 
     changed battery voltage reporting around
     
+    
     v 3.0           201610170322Z       28166/28672/1763
 
     nearing production-quality code
     added TCS34725 sensor, removed UV
-    current radiopacket format
-        BY-WX.77,42,1012,2400,128,4000:
-        from-type.temp,humi,pres,colorTemp,lux,vBat:
-    
+   
     
     v 2.2            201610151946Z       17794/28672/924
     
     cleaned up radiopacket build sequence, changed to sprintf
     
+    
     v 2.0           201610130540Z
 
     added sensor data from BME280 to radiopacket; [2 character ID][1 character TX type][2 character temp C][2 character humidity%][4 character pressure mb][packetnum++]
-        ID      RV  Rover
-                BY  Back yard
-                FY  Front yard
-                MC  Mission Control
-                
-        TX      *   weather beacon
-                #   general beacon
-                !   command
-                @   ping              
-                
+               
+    
     v 1.1           201610090650Z
     
     cleaned up the code a bit
     
+
     v 1.0           201610080405Z
 
     initial commit of RFBeacon
@@ -68,15 +76,13 @@ Adafruit_SSD1306 display(OLED_RESET);
 #define RFM95_CS 8
 #define RFM95_RST 4
 #define RFM95_INT 7
-#define pid "BY"
-#define vers "3.1"
+#define pid "RV-WX"
+#define vers "3.3"
 #define pname "RF Beacon"
 #define VBATPIN A9  // measure battery
 #define RF95_FREQ 915.0  // RFM95 is the 900ISM version, so range is 902-928, 915 center.
 #define LED 13
 
-int16_t packetnum = 0;  // packet counter, we increment transmission
-long previousMillis = 0;
 long interval = 10000;  // interval between transmissions. 1000 is 1 second.
 
 RH_RF95 rf95(RFM95_CS, RFM95_INT);  // Singleton instance of the radio driver
@@ -123,13 +129,11 @@ void setup()
     rf95.setTxPower(23, false);
 }
 
-void loop()  // just transmit rpacket[] every $interval - no listening period (yet)
+void loop()  // just transmit rpacket[] every $interval - no listening period
 {
-    unsigned long currentMillis = millis();
     display.setTextSize(1); display.setTextColor(WHITE);
     
         digitalWrite(13, HIGH);   // LED on, so we can see its doing something
-        previousMillis = currentMillis;  // reset the timer so we know when we last TX'd
         int tmp = ((bme.readTemperature()*1.8)+32);  // get sensor values
         int humi = (bme.readHumidity());
         int pres = ((bme.readPressure() / 100.0F)+34);
@@ -137,22 +141,23 @@ void loop()  // just transmit rpacket[] every $interval - no listening period (y
         tcs.getRawData(&r, &g, &b, &c);
         colorTemp = tcs.calculateColorTemperature(r, g, b);
         lux = tcs.calculateLux(r, g, b);
-        
+
+        if (lux<=10) colorTemp = 1;  // low light levels make the color temp go wonky
+  
         float measuredvbat = analogRead(VBATPIN);
-        measuredvbat *= 2;    // voltage divider was used, so double the measurement
-        measuredvbat *= 3.3;  // multiply by aref (3.3) - send this so i dont have to worry about decimals. /= 1024 to get voltage on the rx end.
-        measuredvbat /= 1024;
-        measuredvbat *= 100;
-        int batlvl = map(measuredvbat, 320, 420, 5, 95);  // crude battery level here, vbat*=100 to get rid of the decimal [since map() uses integer math] then map it to 5-95
-        
+        measuredvbat *= .64453125; // math to get voltage to feed into batlvl
+        int batlvl = map(measuredvbat, 320, 420, 5, 95);  // then take all that and map it to 5-95 to approximate battery % remaining
+                
         display.clearDisplay();
         display.setTextSize(1); display.setTextColor(WHITE); display.setCursor(0,0);
-        display.print(tmp); display.print(" "); display.print(humi); display.print(" "); display.print(pres); display.print(" "); display.print(colorTemp); display.print(" "); display.println(lux); 
-        display.println("T  H  Pr   cT    lx");
-        display.print(batlvl); display.print(" v | "); display.print("int "); display.print(interval/1000); display.println(" s");
-        
+        display.print(pname); display.print(" "); display.println(vers);
+        display.setCursor(0,16); display.print(tmp); display.print(" "); display.print(humi); display.print(" "); display.print(pres); display.print(" "); display.print(colorTemp); display.print(" "); display.println(lux); 
+        display.print("bat. "); display.print(batlvl); display.print("%    "); display.print("int "); display.print(interval/1000); display.println(" s");
+        display.setCursor(0,24);
+                
+        digitalWrite(A0, HIGH);
         char rpacket[64];
-        sprintf(rpacket, "BY-WX:%d,%d,%d,%d,%d,%d:",tmp,humi,pres,colorTemp,lux,batlvl);  // use sprintf to build our packet! char to 64, then mask it out
+        sprintf(rpacket, "RV-WX:%d,%d,%d,%d,%d,%d:",tmp,humi,pres,colorTemp,lux,batlvl);  // use sprintf to build our packet! char to 64, then mask it out
         delay(50);  // wait a bit
         rf95.send((uint8_t *)rpacket, strlen(rpacket));  // send the packet we previously built
         rf95.waitPacketSent();  // wait for TX to complete
@@ -172,17 +177,11 @@ void oledinit()
     display.display();
     display.clearDisplay();
     display.setTextSize(1); display.setTextColor(WHITE); display.setCursor(0,0);
-    display.println(pname); 
-    Serial.println(pname);
-    display.print("v ");
-    Serial.print("v ");
-    display.println(vers);
-    Serial.println(vers);
-    display.setCursor(0,24);
+    display.print(pname); display.print(" "); display.println(vers);
+    display.setCursor(0,16); display.print("device ID ["); display.print(pid); display.println("]");
     display.println("halosix technologies");
-    Serial.println("halosix technologies");
     display.display();
-    delay(3000);
+    delay(5000);
     display.clearDisplay();
     
 }
