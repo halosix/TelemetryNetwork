@@ -1,0 +1,150 @@
+/*
+    RF Beacon - no display
+
+    Sketch uses 27,618 bytes  1,737 bytes
+
+Sketch uses 20,130 bytes 991 bytes
+    v 3.3b          201610190313Z       20130/28672/991
+
+    sub-version of 3.3 for device without display
+        this frees up nearly 8K static / 1K SRAM!  
+    
+    
+    v 3.3           201610190221Z       27616/28672/1735
+
+    condensed the battery level math
+    added a sanity check to lux so cT doesnt overflow the display
+    added a sanity check to lux so lux doesnt overflow the display
+    NOTE: 3.2 code ran on two devices (BY and RV) for ~24 hours with no issues, battery capacity seems adequate
+    
+    
+    v 3.2           201610170626Z       27672/28672/1741
+
+    removed currentMillis / interval stuff, replaced with radio.sleep() and Watchdog.sleep(), added #include Adafruit_SleepyDog.h [for power reasons, we'll see if it matters]
+    
+    
+    v 3.1           201610170528Z       27678/28672/1743
+
+    changed battery voltage reporting around
+    
+    
+    v 3.0           201610170322Z       28166/28672/1763
+
+    nearing production-quality code
+    added TCS34725 sensor, removed UV
+   
+    
+    v 2.2            201610151946Z       17794/28672/924
+    
+    cleaned up radiopacket build sequence, changed to sprintf
+    
+    
+    v 2.0           201610130540Z
+
+    added sensor data from BME280 to radiopacket; [2 character ID][1 character TX type][2 character temp C][2 character humidity%][4 character pressure mb][packetnum++]
+               
+    
+    v 1.1           201610090650Z
+    
+    cleaned up the code a bit
+    
+
+    v 1.0           201610080405Z
+
+    initial commit of RFBeacon
+    32u4 Feather LoRa with BME280
+    beacons the current temperature in fahrenheit every $interval (default 2000ms)
+ */
+
+/* Sketch uses 23,932 bytes (83%) of program storage space. Maximum is 28,672 bytes.
+Global variables use 1,664 bytes of dynamic memory. WITH OLED */
+
+#include <SPI.h>
+#include <Wire.h>
+#include <RH_RF95.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
+#include <Adafruit_TCS34725.h>
+#include <Adafruit_SleepyDog.h>
+
+#define RFM95_CS 8
+#define RFM95_RST 4
+#define RFM95_INT 7
+#define pid "BY-WX"
+#define vers "3.3b"
+#define pname "RF Beacon"
+#define VBATPIN A9  // measure battery
+#define RF95_FREQ 915.0  // RFM95 is the 900ISM version, so range is 902-928, 915 center.
+#define LED 13
+
+long interval = 10000;  // interval between transmissions. 1000 is 1 second.
+
+RH_RF95 rf95(RFM95_CS, RFM95_INT);  // Singleton instance of the radio driver
+Adafruit_BME280 bme; // use i2c, lets keep spi for rf
+
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
+
+void setup()   
+{                
+    Serial.begin(9600);
+    pinMode(A0, OUTPUT);
+    pinMode(RFM95_RST, OUTPUT);
+    digitalWrite(RFM95_RST, HIGH);
+    digitalWrite(RFM95_RST, LOW);   // manually reset the RF
+    delay(10);
+    digitalWrite(RFM95_RST, HIGH);
+    delay(10);
+
+    while (!rf95.init()) {
+        Serial.println("RFM95 init failed");
+        while (1); }
+    
+    Serial.println("RFM95 init passed");
+
+    if (!rf95.setFrequency(RF95_FREQ)) {
+        Serial.println("setFrequency failed");
+        while (1); }
+
+    if (!bme.begin()) {
+        Serial.println("Could not find a valid BME280 sensor, check wiring!");
+        while (1); }
+        
+    if (tcs.begin()) {
+        Serial.println("Found sensor");
+        } else {
+        Serial.println("No TCS34725 found ... check your connections");
+        while (1);
+        }
+    rf95.setTxPower(23, false);
+}
+
+void loop()  // just transmit rpacket[] every $interval - no listening period
+{
+    
+        digitalWrite(13, HIGH);   // LED on, so we can see its doing something
+        int tmp = ((bme.readTemperature()*1.8)+32);  // get sensor values
+        int humi = (bme.readHumidity());
+        int pres = ((bme.readPressure() / 100.0F)+34);
+        uint16_t r, g, b, c, colorTemp, lux;
+        tcs.getRawData(&r, &g, &b, &c);
+        colorTemp = tcs.calculateColorTemperature(r, g, b);
+        lux = tcs.calculateLux(r, g, b);
+
+        if (lux<=10) colorTemp = 1;  // low light levels make the color temp go wonky
+  
+        float measuredvbat = analogRead(VBATPIN);
+        measuredvbat *= .64453125; // math to get voltage to feed into batlvl
+        int batlvl = map(measuredvbat, 320, 420, 5, 95);  // then take all that and map it to 5-95 to approximate battery % remaining
+        
+        digitalWrite(A0, HIGH);
+        char rpacket[64];
+        sprintf(rpacket, "BY-WX:%d,%d,%d,%d,%d,%d:",tmp,humi,pres,colorTemp,lux,batlvl);  // use sprintf to build our packet! char to 64, then mask it out
+        delay(50);  // wait a bit
+        rf95.send((uint8_t *)rpacket, strlen(rpacket));  // send the packet we previously built
+        rf95.waitPacketSent();  // wait for TX to complete
+        digitalWrite(13, LOW);    // LED off, with the stuff and the delay(50) there should be plenty for a visible flicker
+        digitalWrite(A0, LOW);
+        
+    rf95.sleep();
+    Watchdog.sleep(interval);
+}
