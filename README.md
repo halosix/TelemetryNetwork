@@ -1,3 +1,6 @@
+this is deprecated, code retained for historical purposes
+
+
 # TelemetryNetwork
 Arduino powered telemetry network
 
